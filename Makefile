@@ -1,4 +1,4 @@
-obj-m += hide_dir.o
+obj-m += hide_file.o
 
 all:
 	make -C /lib/modules/$(shell uname -r)/build M=$(shell pwd) modules

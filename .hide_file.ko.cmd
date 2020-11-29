@@ -1,0 +1,1 @@
+cmd_/home/itamar/1/hide_files/hide_file.ko := ld -r -m elf_x86_64  -z max-page-size=0x200000  --build-id  -T ./scripts/module-common.lds -o /home/itamar/1/hide_files/hide_file.ko /home/itamar/1/hide_files/hide_file.o /home/itamar/1/hide_files/hide_file.mod.o;  true
